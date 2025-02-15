@@ -22,15 +22,62 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/gagliardetto/solana-go"
-	"github.com/gagliardetto/solana-go/text"
+	"github.com/gorilla/websocket"
+	"github.com/pkg/errors"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/gagliardetto/solana-go"
+	"github.com/gagliardetto/solana-go/rpc"
+	"github.com/gagliardetto/solana-go/text"
 )
+
+type testServer struct {
+	t *testing.T
+}
+
+func (s *testServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	upgrader := websocket.Upgrader{}
+	c, err := upgrader.Upgrade(w, req, nil)
+	require.NoError(s.t, err)
+	defer c.Close()
+	//_ = c.WriteJSON(struct {
+	//}{})
+}
+
+func TestClient(t *testing.T) {
+	server := testServer{t: t}
+	s := httptest.NewServer(&server)
+	client, err := ConnectWithOptions(context.Background(), "ws"+strings.TrimPrefix(s.URL, "http"), nil)
+	require.NoError(t, err)
+	defer client.Close()
+
+	//client.SignatureSubscribe()
+
+	for range [500]int{} {
+		time.Sleep(time.Second)
+		_, err := client.SignatureSubscribe(solana.SignatureFromBytes([]byte(string("test"))), rpc.CommitmentType(rpc.ConfirmationStatusFinalized))
+		if err != nil {
+			syscallError := &os.SyscallError{}
+			if errors.As(err, &syscallError) {
+				t.Log(syscallError.Err.Error() == "broken pipe")
+			}
+			t.Log(err)
+		}
+	}
+	//accountID := solana.MustPublicKeyFromBase58("SqJP6vrvMad5XBQK5PCFEZjeuQSFi959sdpqtSNvnsX")
+
+	//sub, err := client.AccountSubscribe(accountID, "")
+	//data, err := sub.Recv(context.Background())
+	//require.NoError(t, err)
+	//t.Log(data)
+}
 
 func Test_AccountSubscribe(t *testing.T) {
 	t.Skip("Never ending test, revisit me to not depend on actual network calls, or hide between env flag")
@@ -137,7 +184,7 @@ func Test_ProgramSubscribe(t *testing.T) {
 
 }
 func Test_SlotSubscribe(t *testing.T) {
-	t.Skip("Never ending test, revisit me to not depend on actual network calls, or hide between env flag")
+	//t.Skip("Never ending test, revisit me to not depend on actual network calls, or hide between env flag")
 
 	zlog, _ = zap.NewDevelopment()
 
@@ -145,7 +192,7 @@ func Test_SlotSubscribe(t *testing.T) {
 	defer c.Close()
 	require.NoError(t, err)
 
-	sub, err := c.SlotSubscribe()
+	sub, err := c.LogsSubscribe(LogsSubscribeFilterAllWithVotes, rpc.CommitmentConfirmed)
 	require.NoError(t, err)
 
 	data, err := sub.Recv(context.Background())
@@ -153,6 +200,6 @@ func Test_SlotSubscribe(t *testing.T) {
 		fmt.Println("receive an error: ", err)
 		return
 	}
-	fmt.Println("data received: ", data.Parent)
+	fmt.Println("data received: ", data)
 	return
 }

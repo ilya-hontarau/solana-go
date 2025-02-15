@@ -30,6 +30,7 @@ import (
 	"github.com/buger/jsonparser"
 	"github.com/gorilla/rpc/v2/json2"
 	"github.com/gorilla/websocket"
+	"github.com/recws-org/recws"
 	"go.uber.org/zap"
 )
 
@@ -39,7 +40,7 @@ type result interface{}
 
 type Client struct {
 	rpcURL                  string
-	conn                    *websocket.Conn
+	conn                    *recws.RecConn
 	connCtx                 context.Context
 	connCtxCancel           context.CancelFunc
 	lock                    sync.RWMutex
@@ -92,32 +93,12 @@ func ConnectWithOptions(ctx context.Context, rpcEndpoint string, opt *Options) (
 	if opt != nil && opt.HttpHeader != nil && len(opt.HttpHeader) > 0 {
 		httpHeader = opt.HttpHeader
 	}
-	var resp *http.Response
-	c.conn, resp, err = dialer.DialContext(ctx, rpcEndpoint, httpHeader)
-	if err != nil {
-		if resp != nil {
-			body, _ := io.ReadAll(resp.Body)
-			err = fmt.Errorf("new ws client: dial: %w, status: %s, body: %q", err, resp.Status, string(body))
-		} else {
-			err = fmt.Errorf("new ws client: dial: %w", err)
-		}
-		return nil, err
+	c.conn = &recws.RecConn{
+		KeepAliveTimeout: 10 * time.Second,
 	}
+	c.conn.Dial(rpcEndpoint, httpHeader)
 
 	c.connCtx, c.connCtxCancel = context.WithCancel(context.Background())
-	go func() {
-		c.conn.SetReadDeadline(time.Now().Add(pongWait))
-		c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
-		ticker := time.NewTicker(pingPeriod)
-		for {
-			select {
-			case <-c.connCtx.Done():
-				return
-			case <-ticker.C:
-				c.sendPing()
-			}
-		}
-	}()
 	go c.receiveMessages()
 	return c, nil
 }
