@@ -30,8 +30,9 @@ import (
 	"github.com/buger/jsonparser"
 	"github.com/gorilla/rpc/v2/json2"
 	"github.com/gorilla/websocket"
-	"github.com/recws-org/recws"
 	"go.uber.org/zap"
+
+	"github.com/gagliardetto/solana-go/rpc/ws/wsreconn"
 )
 
 var ErrSubscriptionClosed = errors.New("subscription closed")
@@ -40,7 +41,7 @@ type result interface{}
 
 type Client struct {
 	rpcURL                  string
-	conn                    *recws.RecConn
+	conn                    *wsreconn.Reconn
 	connCtx                 context.Context
 	connCtxCancel           context.CancelFunc
 	lock                    sync.RWMutex
@@ -89,17 +90,29 @@ func ConnectWithOptions(ctx context.Context, rpcEndpoint string, opt *Options) (
 		dialer.HandshakeTimeout = opt.HandshakeTimeout
 	}
 
-	var httpHeader http.Header = nil
-	if opt != nil && opt.HttpHeader != nil && len(opt.HttpHeader) > 0 {
-		httpHeader = opt.HttpHeader
+	//var httpHeader http.Header = nil
+	//if opt != nil && opt.HttpHeader != nil && len(opt.HttpHeader) > 0 {
+	//	httpHeader = opt.HttpHeader
+	//}
+	c.conn, err = wsreconn.NewReconn(ctx, rpcEndpoint)
+	if err != nil {
+		return nil, err
 	}
-	c.conn = &recws.RecConn{
-		KeepAliveTimeout: 10 * time.Second,
-	}
-	c.conn.Dial(rpcEndpoint, httpHeader)
-
 	c.connCtx, c.connCtxCancel = context.WithCancel(context.Background())
 	go c.receiveMessages()
+	go func() {
+		c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		c.conn.SetPongHandler(func(string) error { c.conn.SetReadDeadline(time.Now().Add(pongWait)); return nil })
+		ticker := time.NewTicker(pingPeriod)
+		for {
+			select {
+			case <-c.connCtx.Done():
+				return
+			case <-ticker.C:
+				c.sendPing()
+			}
+		}
+	}()
 	return c, nil
 }
 
