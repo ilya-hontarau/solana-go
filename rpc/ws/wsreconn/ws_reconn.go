@@ -29,6 +29,13 @@ func (r *Reconn) IsConnected() bool {
 	return r.isConnected
 }
 
+func (r *Reconn) getConn() *websocket.Conn {
+	r.mx.Lock()
+	defer r.mx.Unlock()
+
+	return r.conn
+}
+
 func NewReconn(ctx context.Context, url string) (*Reconn, error) {
 	conn, _, err := websocket.DefaultDialer.DialContext(ctx, url, nil)
 	if err != nil {
@@ -48,20 +55,28 @@ func NewReconn(ctx context.Context, url string) (*Reconn, error) {
 
 func (rc *Reconn) SetWriteDeadline(t time.Time) error {
 	rc.mx.Lock()
-	defer rc.mx.Unlock()
 	if !rc.isConnected {
+		rc.mx.Unlock()
+
 		return ErrNotConnected
 	}
-	return rc.conn.SetWriteDeadline(t)
+	conn := rc.conn
+	rc.mx.Unlock()
+
+	return conn.SetWriteDeadline(t)
 }
 
 func (rc *Reconn) SetReadDeadline(t time.Time) error {
 	rc.mx.Lock()
-	defer rc.mx.Unlock()
 	if !rc.isConnected {
+		rc.mx.Unlock()
+
 		return ErrNotConnected
 	}
-	return rc.conn.SetReadDeadline(t)
+	conn := rc.conn
+	rc.mx.Unlock()
+
+	return conn.SetReadDeadline(t)
 }
 
 func (rc *Reconn) SetPongHandler(h func(string) error) {
@@ -78,9 +93,7 @@ func (rc *Reconn) WriteMessage(messageType int, data []byte) error {
 	if !rc.IsConnected() {
 		return ErrNotConnected
 	}
-	rc.mx.Lock()
-	err := rc.conn.WriteMessage(messageType, data)
-	rc.mx.Unlock()
+	err := rc.getConn().WriteMessage(messageType, data)
 	if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 		rc.Close()
 		return nil
@@ -95,9 +108,7 @@ func (rc *Reconn) WriteJSON(data any) error {
 	if !rc.IsConnected() {
 		return ErrNotConnected
 	}
-	rc.mx.Lock()
-	err := rc.conn.WriteJSON(data)
-	rc.mx.Unlock()
+	err := rc.getConn().WriteJSON(data)
 	if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 		rc.Close()
 		return nil
@@ -112,9 +123,7 @@ func (rc *Reconn) ReadMessage() (messageType int, message []byte, err error) {
 	if !rc.IsConnected() {
 		return 0, nil, ErrNotConnected
 	}
-	rc.mx.Lock()
-	msg, t, err := rc.conn.ReadMessage()
-	rc.mx.Unlock()
+	msg, t, err := rc.getConn().ReadMessage()
 	if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 		rc.Close()
 		return 0, nil, nil
@@ -128,9 +137,7 @@ func (rc *Reconn) ReadJSON(msg any) error {
 	if !rc.IsConnected() {
 		return ErrNotConnected
 	}
-	rc.mx.Lock()
-	err := rc.conn.ReadJSON(msg)
-	rc.mx.Unlock()
+	err := rc.getConn().ReadJSON(msg)
 	if websocket.IsCloseError(err, websocket.CloseNormalClosure) {
 		rc.Close()
 		return nil
