@@ -142,7 +142,8 @@ func (c *Client) receiveMessages() {
 			_, message, err := c.conn.ReadMessage()
 			if err != nil {
 				c.closeAllSubscription(err)
-				return
+				time.Sleep(time.Millisecond * 500)
+				continue
 			}
 			c.handleMessage(message)
 		}
