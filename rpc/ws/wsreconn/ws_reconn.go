@@ -188,6 +188,7 @@ func (rc *Reconn) runReconnect(ctx context.Context) {
 			rc.conn = conn
 			rc.isConnected = true
 			rc.mx.Unlock()
+			log.Println("successfully reconnected")
 		}
 	}
 }
